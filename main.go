@@ -12,9 +12,10 @@ import (
 )
 
 type Planet struct {
-	ID   int        `json:"id"`
+	ID   int    `json:"id"`
 	Name string `json:"name"`
 }
+
 var db *sql.DB
 
 func main() {
@@ -91,5 +92,20 @@ func getPlanets(ctx *gin.Context) {
 }
 
 func addPlanet(ctx *gin.Context) {
-	db.Exec("INSERT INTO planets VALUES(1, 'ziemia')")
+	newPlanet := Planet{
+		Name: "Mars",
+	}
+	var id int
+	err := db.QueryRow("INSERT INTO planets (name) VALUES ($1) RETURNING id", newPlanet.Name).Scan(&id)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error message": "error adding a planet",
+		})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"message":     "planet added succesfully",
+		"inserted_id": id,
+		"name":        newPlanet.Name,
+	})
 }
