@@ -1,3 +1,11 @@
-# Not a project, just a test configuration of Dockerfile, Docker-compose, Postgres, Golang and maybe somethink more in future
+# Simple test project
+
+## Testing project for technologies such as:
+
+- golang
+- dockerfile
+- dockercompose
+- postgresql
+- redis
 
 ## i know pushing .env file is not the best idea
