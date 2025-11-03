@@ -93,6 +93,16 @@ func setupDB() error {
 }
 
 func getPlanets(c *gin.Context) {
+	cacheKey := "planet:all"
+	cachedData, err := rdb.Get(ctx, cacheKey).Result()
+	if err == nil {
+		redisPlanets := []Planet{}
+		if json.Unmarshal([]byte(cachedData), &redisPlanets) == nil {
+			c.JSON(http.StatusOK, redisPlanets)
+			return
+		}
+	}
+
 	rows, err := db.Query("SELECT id, name FROM planets")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -117,6 +127,11 @@ func getPlanets(c *gin.Context) {
 		planets = append(planets, p)
 
 	}
+	planetJson, err := json.Marshal(planets)
+	if err == nil {
+		rdb.Set(ctx, cacheKey, planetJson, 5*time.Minute)
+	}
+
 	c.JSON(http.StatusOK, planets)
 }
 
@@ -193,6 +208,13 @@ func deletePlanet(c *gin.Context) {
 	} else {
 		log.Printf("Cache invalidated for planet:%s", id)
 	}
+	cacheKey = "planet:all"
+	err = rdb.Del(ctx, cacheKey).Err()
+	if err != nil {
+		log.Printf("failed to invalidate cache for planets : %v", err)
+	} else {
+		log.Printf("Cache invalidated for planes")
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Planeted deleted",
@@ -233,6 +255,13 @@ func updatePlanet(c *gin.Context) {
 	} else {
 		log.Printf("Cache invalidated for planet:%s", id)
 	}
+	cacheKey = "planet:all"
+	err = rdb.Del(ctx, cacheKey).Err()
+	if err != nil {
+		log.Printf("failed to invalidate cache for planets : %v", err)
+	} else {
+		log.Printf("Cache invalidated for planes")
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Planet updated",
@@ -260,6 +289,14 @@ func addPlanet(c *gin.Context) {
 		})
 		return
 	}
+	cacheKey := "planet:all"
+	err = rdb.Del(ctx, cacheKey).Err()
+	if err != nil {
+		log.Printf("failed to invalidate cache for planets : %v", err)
+	} else {
+		log.Printf("Cache invalidated for planes")
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"message":     "planet added succesfully",
 		"inserted_id": id,
