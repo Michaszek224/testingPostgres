@@ -46,6 +46,8 @@ func main() {
 	r := gin.Default()
 	r.GET("/", getPlanets)
 	r.GET("/:id", getPlanetById)
+	r.DELETE("/:id", deletePlanet)
+	r.PUT("/:id", updatePlanet)
 	r.POST("/", addPlanet)
 	r.Run()
 }
@@ -111,6 +113,42 @@ func getPlanetById(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, getPlanet)
+}
+
+func deletePlanet(ctx *gin.Context) {
+	id := ctx.Param("id")
+
+	result, err := db.Exec("DELETE FROM planets WHERE id=$1", id)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error": "error deleting planet",
+		})
+		log.Printf("error deleting planet: %v", err)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error": "error getting rows affected",
+		})
+		log.Printf("error getting rows affected: %v", err)
+		return
+	}
+
+	if rowsAffected == 0 {
+		ctx.JSON(http.StatusNotFound, gin.H{
+			"error": "Planet not found",
+		})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{
+		"message": "Planeted deleted",
+	})
+}
+
+func updatePlanet(ctx *gin.Context) {
+
 }
 
 func addPlanet(ctx *gin.Context) {
