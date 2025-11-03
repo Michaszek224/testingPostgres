@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
+	"github.com/redis/go-redis/v9"
 )
 
 type Planet struct {
@@ -17,6 +21,8 @@ type Planet struct {
 }
 
 var db *sql.DB
+var rdb *redis.Client
+var ctx = context.Background()
 
 func main() {
 	user := os.Getenv("DB_USER")
@@ -39,10 +45,30 @@ func main() {
 		log.Fatalf("Could not connect to db: %v", err)
 
 	}
+
 	err = setupDB()
 	if err != nil {
 		log.Fatalf("error sertting up database: %v", err)
 	}
+
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisAddr == "" {
+		fmt.Printf("error redis addr")
+		return
+	}
+
+	rdb = redis.NewClient(&redis.Options{
+		Addr:     redisAddr,
+		Password: "",
+		DB:       0,
+	})
+
+	_, err = rdb.Ping(ctx).Result()
+	if err != nil {
+		log.Fatalf("Coul;d not connect to redis: %v", err)
+	}
+	log.Println("connected to redis")
+
 	r := gin.Default()
 	r.GET("/", getPlanets)
 	r.GET("/:id", getPlanetById)
@@ -66,10 +92,10 @@ func setupDB() error {
 	return nil
 }
 
-func getPlanets(ctx *gin.Context) {
+func getPlanets(c *gin.Context) {
 	rows, err := db.Query("SELECT id, name FROM planets")
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{
+		c.JSON(http.StatusBadRequest, gin.H{
 			"error message": "error selecting planets",
 		})
 		log.Printf("error selecting planets: %v", err)
@@ -82,7 +108,7 @@ func getPlanets(ctx *gin.Context) {
 		var p Planet
 		err := rows.Scan(&p.ID, &p.Name)
 		if err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{
+			c.JSON(http.StatusBadRequest, gin.H{
 				"error message": "error scanning planets",
 			})
 			log.Printf("error scanning planets: %v", err)
@@ -91,36 +117,53 @@ func getPlanets(ctx *gin.Context) {
 		planets = append(planets, p)
 
 	}
-	ctx.JSON(http.StatusOK, planets)
+	c.JSON(http.StatusOK, planets)
 }
 
-func getPlanetById(ctx *gin.Context) {
-	id := ctx.Param("id")
+func getPlanetById(c *gin.Context) {
+	id := c.Param("id")
+
+	cacheKey := fmt.Sprintf("planet:%s", id)
+	cachedData, err := rdb.Get(ctx, cacheKey).Result()
+	if err == nil {
+		var planet Planet
+		if json.Unmarshal([]byte(cachedData), &planet) == nil {
+			c.JSON(http.StatusOK, planet)
+			return
+		}
+	}
+
 	row := db.QueryRow("SELECT id, name FROM planets WHERE id=$1", id)
 
 	var getPlanet Planet
-	err := row.Scan(&getPlanet.ID, &getPlanet.Name)
+	err = row.Scan(&getPlanet.ID, &getPlanet.Name)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			ctx.JSON(http.StatusNotFound, gin.H{
+			c.JSON(http.StatusNotFound, gin.H{
 				"error": "planet not found",
 			})
 		} else {
-			ctx.JSON(http.StatusBadRequest, gin.H{
+			c.JSON(http.StatusBadRequest, gin.H{
 				"error message": "error scanning planet by id",
 			})
 		}
 		return
 	}
-	ctx.JSON(http.StatusOK, getPlanet)
+
+	planetJson, err := json.Marshal(getPlanet)
+	if err == nil {
+		rdb.Set(ctx, cacheKey, planetJson, 5*time.Minute)
+	}
+
+	c.JSON(http.StatusOK, getPlanet)
 }
 
-func deletePlanet(ctx *gin.Context) {
-	id := ctx.Param("id")
+func deletePlanet(c *gin.Context) {
+	id := c.Param("id")
 
 	result, err := db.Exec("DELETE FROM planets WHERE id=$1", id)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "error deleting planet",
 		})
 		log.Printf("error deleting planet: %v", err)
@@ -129,7 +172,7 @@ func deletePlanet(ctx *gin.Context) {
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "error getting rows affected",
 		})
 		log.Printf("error getting rows affected: %v", err)
@@ -137,57 +180,57 @@ func deletePlanet(ctx *gin.Context) {
 	}
 
 	if rowsAffected == 0 {
-		ctx.JSON(http.StatusNotFound, gin.H{
+		c.JSON(http.StatusNotFound, gin.H{
 			"error": "Planet not found",
 		})
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{
+	c.JSON(http.StatusOK, gin.H{
 		"message": "Planeted deleted",
 	})
 }
 
-func updatePlanet(ctx *gin.Context) {
-	id := ctx.Param("id")
+func updatePlanet(c *gin.Context) {
+	id := c.Param("id")
 
 	var updatedPlanet Planet
-	err := ctx.BindJSON(&updatedPlanet)
+	err := c.BindJSON(&updatedPlanet)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
 		return
 	}
 
 	result, err := db.Exec("UPDATE planets SET name=$1 WHERE id=$2", updatedPlanet.Name, id)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error updating"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error updating"})
 		log.Printf("Error updating: %v", err)
 		return
 	}
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error affecrted rows"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error affecrted rows"})
 		return
 	}
 
 	if rowsAffected == 0 {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": "Planet not found"})
+		c.JSON(http.StatusNotFound, gin.H{"error": "Planet not found"})
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{
+	c.JSON(http.StatusOK, gin.H{
 		"message": "Planet updated",
 		"id":      id,
 		"name":    updatedPlanet.Name,
 	})
 }
 
-func addPlanet(ctx *gin.Context) {
+func addPlanet(c *gin.Context) {
 	var newPlanet Planet
 
-	err := ctx.BindJSON(&newPlanet)
+	err := c.BindJSON(&newPlanet)
 	if err != nil {
-		ctx.JSON(http.StatusOK, gin.H{
+		c.JSON(http.StatusOK, gin.H{
 			"error": "Invalid request bvody",
 		})
 		return
@@ -196,12 +239,12 @@ func addPlanet(ctx *gin.Context) {
 	var id int
 	err = db.QueryRow("INSERT INTO planets (name) VALUES ($1) RETURNING id", newPlanet.Name).Scan(&id)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{
+		c.JSON(http.StatusBadRequest, gin.H{
 			"error message": "error adding a planet",
 		})
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{
+	c.JSON(http.StatusOK, gin.H{
 		"message":     "planet added succesfully",
 		"inserted_id": id,
 		"name":        newPlanet.Name,

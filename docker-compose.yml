@@ -17,6 +17,18 @@ services:
       timeout: 5s
       retries: 5
 
+  cache:
+    image: redis:alpine 
+    container_name: redis_container
+    ports:
+      - '6379:6379'
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+
   app:
     build: .
     container_name: golang_cointainer
@@ -26,6 +38,7 @@ services:
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_NAME=${DB_NAME}
+      - REDIS_ADDR=cache:6379
     env_file:
       - .env
     ports:
@@ -35,4 +48,6 @@ services:
       - .:/usr/src/app
     depends_on:
       db:
+        condition: service_healthy
+      cache:
         condition: service_healthy
