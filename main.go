@@ -70,6 +70,9 @@ func main() {
 	log.Println("connected to redis")
 
 	r := gin.Default()
+
+	r.Use(rateLimiterMiddleware())
+
 	r.GET("/", getPlanets)
 	r.GET("/:id", getPlanetById)
 	r.DELETE("/:id", deletePlanet)
@@ -302,4 +305,32 @@ func addPlanet(c *gin.Context) {
 		"inserted_id": id,
 		"name":        newPlanet.Name,
 	})
+}
+
+func rateLimiterMiddleware() gin.HandlerFunc {
+	limit := 20
+	window := 1 * time.Minute
+
+	return func(c *gin.Context) {
+		key := fmt.Sprintf("rate_limit:%s", c.ClientIP())
+
+		count, err := rdb.Incr(ctx, key).Result()
+		if err != nil {
+			log.Printf("Error redis limiter: %v", err)
+			c.Next()
+			return
+		}
+
+		if count == 1 {
+			rdb.Expire(ctx, key, window)
+		}
+
+		if count > int64(limit) {
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error": "too many requests",
+			})
+			return
+		}
+		c.Next()
+	}
 }
