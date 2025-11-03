@@ -185,6 +185,15 @@ func deletePlanet(c *gin.Context) {
 		})
 		return
 	}
+
+	cacheKey := fmt.Sprintf("planet:%s", id)
+	err = rdb.Del(ctx, cacheKey).Err()
+	if err != nil {
+		log.Printf("failed to invalidate cache for planet%s : %v", id, err)
+	} else {
+		log.Printf("Cache invalidated for planet:%s", id)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Planeted deleted",
 	})
@@ -217,6 +226,13 @@ func updatePlanet(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Planet not found"})
 		return
 	}
+	cacheKey := fmt.Sprintf("planet:%s", id)
+	err = rdb.Del(ctx, cacheKey).Err()
+	if err != nil {
+		log.Printf("failed to invalidate cache for planet%s : %v", id, err)
+	} else {
+		log.Printf("Cache invalidated for planet:%s", id)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Planet updated",
@@ -230,7 +246,7 @@ func addPlanet(c *gin.Context) {
 
 	err := c.BindJSON(&newPlanet)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
+		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "Invalid request bvody",
 		})
 		return
