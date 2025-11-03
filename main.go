@@ -148,7 +148,38 @@ func deletePlanet(ctx *gin.Context) {
 }
 
 func updatePlanet(ctx *gin.Context) {
+	id := ctx.Param("id")
 
+	var updatedPlanet Planet
+	err := ctx.BindJSON(&updatedPlanet)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	result, err := db.Exec("UPDATE planets SET name=$1 WHERE id=$2", updatedPlanet.Name, id)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error updating"})
+		log.Printf("Error updating: %v", err)
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Error affecrted rows"})
+		return
+	}
+
+	if rowsAffected == 0 {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "Planet not found"})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"message": "Planet updated",
+		"id":      id,
+		"name":    updatedPlanet.Name,
+	})
 }
 
 func addPlanet(ctx *gin.Context) {
