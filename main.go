@@ -45,7 +45,8 @@ func main() {
 	}
 	r := gin.Default()
 	r.GET("/", getPlanets)
-	r.GET("/add", addPlanet)
+	r.GET("/:id", getPlanetById)
+	r.POST("/", addPlanet)
 	r.Run()
 }
 
@@ -91,12 +92,40 @@ func getPlanets(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, planets)
 }
 
-func addPlanet(ctx *gin.Context) {
-	newPlanet := Planet{
-		Name: "Mars",
+func getPlanetById(ctx *gin.Context) {
+	id := ctx.Param("id")
+	row := db.QueryRow("SELECT id, name FROM planets WHERE id=$1", id)
+
+	var getPlanet Planet
+	err := row.Scan(&getPlanet.ID, &getPlanet.Name)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			ctx.JSON(http.StatusNotFound, gin.H{
+				"error": "planet not found",
+			})
+		} else {
+			ctx.JSON(http.StatusBadRequest, gin.H{
+				"error message": "error scanning planet by id",
+			})
+		}
+		return
 	}
+	ctx.JSON(http.StatusOK, getPlanet)
+}
+
+func addPlanet(ctx *gin.Context) {
+	var newPlanet Planet
+
+	err := ctx.BindJSON(&newPlanet)
+	if err != nil {
+		ctx.JSON(http.StatusOK, gin.H{
+			"error": "Invalid request bvody",
+		})
+		return
+	}
+
 	var id int
-	err := db.QueryRow("INSERT INTO planets (name) VALUES ($1) RETURNING id", newPlanet.Name).Scan(&id)
+	err = db.QueryRow("INSERT INTO planets (name) VALUES ($1) RETURNING id", newPlanet.Name).Scan(&id)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{
 			"error message": "error adding a planet",
